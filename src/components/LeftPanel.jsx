@@ -1,11 +1,10 @@
-import { useState } from 'react'
 
 const LAYERS = [
   { id: 'flights',    label: 'LIVE FLIGHTS',    sub: 'OpenSky Network · Global ADS-B', color: '#00ff41' },
   { id: 'satellites', label: 'ORBITAL ASSETS',  sub: 'CelesTrak TLE · SGP4 Propagation', color: '#00e5ff' },
   { id: 'earthquakes',label: 'SEISMIC EVENTS',  sub: 'USGS · 24h Window', color: '#ff8c00' },
   { id: 'weather',    label: 'WEATHER RADAR',   sub: 'RainViewer · Composite', color: '#4df7ff' },
-  { id: 'cctv',       label: 'CCTV MESH',       sub: 'Municipal Feeds · ATX/NYC', color: '#ff2d2d' },
+  { id: 'cctv',       label: 'CCTV MESH',       sub: 'London · NYC · Ontario · Live', color: '#ff2d2d' },
 ]
 
 const STUB_LAYERS = [
@@ -15,8 +14,6 @@ const STUB_LAYERS = [
 ]
 
 export default function LeftPanel({ layers, setLayers, counts, errors, loading }) {
-  const [cctvOpen, setCctvOpen] = useState(false)
-
   const toggle = (id) => setLayers(prev => ({ ...prev, [id]: !prev[id] }))
 
   return (
@@ -78,13 +75,14 @@ export default function LeftPanel({ layers, setLayers, counts, errors, loading }
             </div>
           ))}
 
-          {/* CCTV expandable */}
+          {/* CCTV info block */}
           {layers.cctv && (
-            <div style={{ margin: '4px 10px', border: '1px solid rgba(255,45,45,0.25)', borderRadius: 2 }}>
-              <div style={{ padding: '4px 8px', fontSize: '8px', color: 'var(--c-red)', letterSpacing: '0.1em' }}>
-                ── FEED STREAMS ──
-              </div>
-              <CCTVStreams />
+            <div style={{ margin: '4px 10px', padding: '7px 8px', border: '1px solid rgba(255,45,45,0.25)', borderRadius: 2, fontSize: '8px', color: 'rgba(255,45,45,0.6)', letterSpacing: '0.08em', lineHeight: 1.7 }}>
+              <div style={{ color: '#ff2d2d', letterSpacing: '0.1em', marginBottom: 4 }}>── LIVE FEEDS ──</div>
+              <div><span style={{ color: '#ff2d2d' }}>●</span> London · TfL JamCam</div>
+              <div><span style={{ color: '#ff8c00' }}>●</span> New York · NYC DOT</div>
+              <div><span style={{ color: '#ffd700' }}>●</span> Ontario · 511 Highway</div>
+              <div style={{ marginTop: 4, color: 'rgba(255,45,45,0.35)' }}>Click any dot → live feed</div>
             </div>
           )}
 
@@ -131,63 +129,3 @@ export default function LeftPanel({ layers, setLayers, counts, errors, loading }
   )
 }
 
-// Embedded CCTV stream thumbnails using public traffic cameras
-function CCTVStreams() {
-  // Austin ATMS public cameras — using placeholder images since actual MJPEG
-  // streams require special handling. Linking to real public feeds.
-  const feeds = [
-    { id: 'atx-1', label: 'ATX · I-35 N', color: '#ff2d2d' },
-    { id: 'atx-2', label: 'ATX · 183 E',  color: '#ff2d2d' },
-    { id: 'nyc-1', label: 'NYC · MIDTOWN', color: '#ff6b00' },
-  ]
-
-  return (
-    <div style={{ padding: '0 8px 8px' }}>
-      {feeds.map(feed => (
-        <div key={feed.id} style={{
-          marginBottom: 6,
-          border: `1px solid rgba(255,45,45,0.3)`,
-          borderRadius: 2,
-          overflow: 'hidden',
-        }}>
-          <div style={{
-            background: 'rgba(255,45,45,0.08)',
-            padding: '2px 6px',
-            fontSize: '7px',
-            color: feed.color,
-            letterSpacing: '0.1em',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-          }}>
-            <span>{feed.label}</span>
-            <span className="blink-fast" style={{ color: feed.color }}>● LIVE</span>
-          </div>
-          {/* Simulated CCTV frame */}
-          <div style={{
-            height: 52,
-            background: '#050505',
-            position: 'relative',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '7px',
-            color: 'rgba(255,45,45,0.4)',
-            letterSpacing: '0.05em',
-          }}>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ marginBottom: 2 }}>◈ STREAM ACTIVE ◈</div>
-              <div style={{ fontSize: '6px', opacity: 0.6 }}>PUBLIC TRAFFIC FEED</div>
-            </div>
-            {/* Noise overlay */}
-            <div style={{
-              position: 'absolute', inset: 0,
-              background: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(255,0,0,0.03) 2px, rgba(255,0,0,0.03) 3px)',
-              pointerEvents: 'none',
-            }} />
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-}

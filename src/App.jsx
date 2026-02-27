@@ -4,10 +4,13 @@ import RightPanel   from './components/RightPanel'
 import HUD          from './components/HUD'
 import BottomBar    from './components/BottomBar'
 import FlightCard   from './components/FlightCard'
+import CCTVPanel    from './components/CCTVPanel'
+import CameraList   from './components/CameraList'
 import { useFlights }     from './hooks/useFlights'
 import { useSatellites }  from './hooks/useSatellites'
 import { useEarthquakes } from './hooks/useEarthquakes'
 import { useWeather }     from './hooks/useWeather'
+import { useCCTV }        from './hooks/useCCTV'
 
 // Lazy-load the heavy globe component
 const Globe = lazy(() => import('./components/Globe'))
@@ -38,10 +41,14 @@ export default function App() {
   const { positions: sats, loading: lSats, error: eSats, count: cSats }       = useSatellites(layers.satellites)
   const { quakes,    loading: lQuakes,   error: eQuakes,   count: cQuakes }    = useEarthquakes(layers.earthquakes)
   const { tileUrl,   loading: lWeather,  error: eWeather }                     = useWeather(layers.weather)
+  const { cameras,   loading: lCCTV,    error: eCCTV,     count: cCCTV }      = useCCTV(layers.cctv)
 
   // ── UI state
-  const [selectedFlight, setSelectedFlight] = useState(null)
-  const [alerts,         setAlerts]         = useState([])
+  const [selectedFlight,  setSelectedFlight]  = useState(null)
+  const [followFlightId,  setFollowFlightId]  = useState(null)
+  const [selectedCamera,  setSelectedCamera]  = useState(null)
+  const [cameraListOpen,  setCameraListOpen]  = useState(false)
+  const [alerts,          setAlerts]          = useState([])
   const globeRef = useRef()
 
   // ── Apply body mode class
@@ -86,9 +93,9 @@ export default function App() {
     if (next.length) setAlerts(next)
   }, [quakes.length, flights.length])
 
-  const counts    = { flights: cFlights, satellites: cSats, earthquakes: cQuakes }
-  const loadingMap = { flights: lFlights, satellites: lSats, earthquakes: lQuakes, weather: lWeather }
-  const errorsMap  = { flights: eFlights, satellites: eSats, earthquakes: eQuakes, weather: eWeather }
+  const counts    = { flights: cFlights, satellites: cSats, earthquakes: cQuakes, cctv: cCCTV }
+  const loadingMap = { flights: lFlights, satellites: lSats, earthquakes: lQuakes, weather: lWeather, cctv: lCCTV }
+  const errorsMap  = { flights: eFlights, satellites: eSats, earthquakes: eQuakes, weather: eWeather, cctv: eCCTV }
 
   return (
     <div style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden' }}>
@@ -101,14 +108,17 @@ export default function App() {
           flights={flights}
           satellites={sats}
           quakes={quakes}
+          cameras={cameras}
           viewMode={viewMode}
           bloom={bloom}
           sharpen={sharpen}
-          onFlightClick={setSelectedFlight}
+          followFlightId={followFlightId}
+          onFlightClick={f => { setSelectedFlight(f); setFollowFlightId(f.id) }}
           onQuakeClick={q => setAlerts(prev => [
             ...prev.slice(-9),
             { id: q.id, type: 'seismic', message: `SEISMIC M${q.mag?.toFixed(1)} · ${(q.place||'').slice(0,40)}`, ts: Date.now() }
           ])}
+          onCameraClick={c => setSelectedCamera(c)}
         />
       </Suspense>
 
@@ -119,7 +129,19 @@ export default function App() {
         counts={counts}
         errors={errorsMap}
         loading={loadingMap}
+        onBrowseCamera={() => setCameraListOpen(o => !o)}
+        cameraListOpen={cameraListOpen}
       />
+
+      {/* ── Camera browser panel */}
+      {layers.cctv && cameraListOpen && (
+        <CameraList
+          cameras={cameras}
+          loading={lCCTV}
+          onSelect={c => { setSelectedCamera(c); setCameraListOpen(false) }}
+          onClose={() => setCameraListOpen(false)}
+        />
+      )}
 
       <RightPanel
         viewMode={viewMode}            setViewMode={setViewMode}
@@ -145,11 +167,25 @@ export default function App() {
       {/* ── Bottom navigation bar */}
       <BottomBar globeRef={globeRef} alerts={alerts} />
 
+      {/* ── CCTV feed panel */}
+      {selectedCamera && (
+        <CCTVPanel
+          camera={selectedCamera}
+          onClose={() => setSelectedCamera(null)}
+        />
+      )}
+
       {/* ── Flight detail card */}
       {selectedFlight && (
         <FlightCard
           flight={selectedFlight}
-          onClose={() => setSelectedFlight(null)}
+          onClose={() => {
+            setSelectedFlight(null)
+            setFollowFlightId(null)
+            globeRef.current?.flyTo(20, 10, 2.5)
+          }}
+          onFollow={() => setFollowFlightId(id => id === selectedFlight.id ? null : selectedFlight.id)}
+          isFollowing={followFlightId === selectedFlight.id}
         />
       )}
 

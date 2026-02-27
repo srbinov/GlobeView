@@ -24,7 +24,7 @@ export function useFlights(enabled) {
       //  sensors, geo_alt, squawk, spi, position_source]
       const mapped = data.states
         .filter(s => s[5] != null && s[6] != null && !s[8]) // has coords, airborne
-        .slice(0, 800) // cap for performance
+        .slice(0, 250) // cap for performance
         .map(s => ({
           id: s[0],
           callsign: (s[1] || s[0] || '???').trim(),
@@ -32,9 +32,12 @@ export function useFlights(enabled) {
           lon: s[5],
           lat: s[6],
           alt: s[7] ? Math.round(s[7]) : 0,
-          speed: s[9] ? Math.round(s[9] * 1.94384) : 0, // m/s → knots
+          speedMs: s[9] || 0,
+          speed: s[9] ? Math.round(s[9] * 1.94384) : 0,
           heading: s[10] || 0,
           vertRate: s[11] || 0,
+          squawk: s[14] || null,
+          lastUpdate: Date.now(),
         }))
       setFlights(mapped)
       setError(null)

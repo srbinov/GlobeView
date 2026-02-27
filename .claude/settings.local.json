@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep:*)",
+      "Bash(cd:*)",
+      "Bash(cd /c/Users/csrbi/OneDrive/palantir2 && git push -u origin master 2>&1)",
+      "Bash(node:*)",
+      "WebSearch",
+      "WebFetch(domain:511ny.org)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:publicapi.ohgo.com)",
+      "WebFetch(domain:511on.ca)"
+    ]
+  }
+}
