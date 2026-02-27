@@ -1,0 +1,274 @@
+@import "tailwindcss";
+
+/* ─── Fonts ─────────────────────────────────────────── */
+:root {
+  --font-mono: 'JetBrains Mono', 'Courier New', monospace;
+
+  /* color tokens */
+  --c-bg:        #000a00;
+  --c-green:     #00ff41;
+  --c-green-dim: #00aa2a;
+  --c-amber:     #ffb000;
+  --c-cyan:      #00e5ff;
+  --c-red:       #ff2d2d;
+  --c-white:     #e8f5e9;
+  --c-panel-bg:  rgba(0, 20, 0, 0.88);
+  --c-border:    rgba(0, 255, 65, 0.25);
+
+  /* scanline gap */
+  --scanline-size: 4px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root {
+  width: 100%; height: 100%; overflow: hidden;
+  background: var(--c-bg);
+  font-family: var(--font-mono);
+  color: var(--c-green);
+}
+
+/* ─── Scrollbar ─────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: #000; }
+::-webkit-scrollbar-thumb { background: var(--c-green-dim); }
+
+/* ─── Scanlines ─────────────────────────────────────── */
+.scanlines::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent calc(var(--scanline-size) - 1px),
+    rgba(0, 0, 0, 0.35) calc(var(--scanline-size) - 1px),
+    rgba(0, 0, 0, 0.35) var(--scanline-size)
+  );
+}
+
+/* ─── CRT Vignette ──────────────────────────────────── */
+.crt-vignette::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9998;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 55%,
+    rgba(0, 0, 0, 0.75) 100%
+  );
+}
+
+/* ─── CRT Flicker ───────────────────────────────────── */
+@keyframes crt-flicker {
+  0%   { opacity: 1; }
+  92%  { opacity: 1; }
+  93%  { opacity: 0.92; }
+  94%  { opacity: 1; }
+  96%  { opacity: 0.88; }
+  98%  { opacity: 1; }
+  100% { opacity: 1; }
+}
+.crt-flicker { animation: crt-flicker 5s infinite; }
+
+/* ─── Blink animation ───────────────────────────────── */
+@keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+.blink { animation: blink 1s step-end infinite; }
+@keyframes blink-fast { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+.blink-fast { animation: blink-fast 0.5s step-end infinite; }
+
+/* ─── Pulse ring ────────────────────────────────────── */
+@keyframes pulse-ring {
+  0%   { transform: scale(1);   opacity: 0.8; }
+  100% { transform: scale(2.5); opacity: 0; }
+}
+
+/* ─── Sweep ─────────────────────────────────────────── */
+@keyframes radar-sweep {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ─── MODES ──────────────────────────────────────────── */
+body.mode-normal  { filter: none; }
+
+body.mode-crt {
+  filter: brightness(1.1) contrast(1.1) saturate(1.2);
+}
+body.mode-crt .globe-wrapper { filter: hue-rotate(90deg) saturate(2) brightness(0.9); }
+
+body.mode-nvg {
+  filter: hue-rotate(80deg) saturate(4) brightness(1.15) contrast(1.2);
+}
+
+body.mode-flir {
+  filter: sepia(1) hue-rotate(-10deg) saturate(5) brightness(1.05) contrast(1.3);
+}
+body.mode-flir .globe-wrapper {
+  filter: sepia(1) hue-rotate(-30deg) saturate(8) brightness(1.1);
+}
+
+body.mode-anime {
+  filter: saturate(2.5) contrast(1.4) brightness(1.1);
+}
+
+body.mode-noir {
+  filter: grayscale(1) contrast(1.5) brightness(0.85);
+}
+
+body.mode-snow {
+  filter: grayscale(0.5) brightness(1.4) contrast(0.8);
+}
+
+body.mode-ai {
+  filter: hue-rotate(200deg) saturate(3) brightness(1.1);
+}
+
+/* ─── Instability ────────────────────────────────────── */
+@keyframes instability {
+  0%   { transform: translate(0, 0) skew(0deg); }
+  10%  { transform: translate(-2px, 0) skew(0.3deg); }
+  20%  { transform: translate(2px, 0) skew(-0.3deg); }
+  30%  { transform: translate(0, 1px); }
+  100% { transform: translate(0, 0); }
+}
+.instability-1 { animation: instability 8s infinite; }
+.instability-2 { animation: instability 4s infinite; }
+.instability-3 { animation: instability 1.5s infinite; }
+
+/* ─── Panel chrome ───────────────────────────────────── */
+.panel {
+  background: var(--c-panel-bg);
+  border: 1px solid var(--c-border);
+  backdrop-filter: blur(4px);
+}
+.panel-header {
+  border-bottom: 1px solid var(--c-border);
+  padding: 6px 10px;
+  font-size: 9px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--c-amber);
+}
+
+/* ─── Toggle ─────────────────────────────────────────── */
+.toggle-btn {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; padding: 4px 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--c-green-dim);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: all 0.1s;
+  text-align: left;
+}
+.toggle-btn:hover { border-color: var(--c-green-dim); color: var(--c-green); }
+.toggle-btn.active { color: var(--c-green); background: rgba(0,255,65,0.08); border-color: var(--c-green-dim); }
+.toggle-btn .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--c-green-dim); flex-shrink: 0;
+}
+.toggle-btn.active .dot { background: var(--c-green); box-shadow: 0 0 6px var(--c-green); }
+
+/* ─── Slider ─────────────────────────────────────────── */
+input[type=range] {
+  -webkit-appearance: none; appearance: none;
+  width: 100%; height: 3px;
+  background: rgba(0,255,65,0.2);
+  border-radius: 0; outline: none; cursor: pointer;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 8px; height: 14px;
+  background: var(--c-amber);
+  border-radius: 1px; cursor: pointer;
+}
+input[type=range]:focus { outline: none; }
+
+/* ─── Select ─────────────────────────────────────────── */
+select {
+  background: rgba(0,20,0,0.9);
+  border: 1px solid var(--c-border);
+  color: var(--c-green);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 2px 6px;
+  outline: none;
+  cursor: pointer;
+}
+
+/* ─── HUD text ───────────────────────────────────────── */
+.hud-label {
+  font-size: 9px; letter-spacing: 0.12em;
+  color: var(--c-amber); text-transform: uppercase;
+}
+.hud-value {
+  font-size: 11px; letter-spacing: 0.05em;
+  color: var(--c-green);
+}
+
+/* ─── City button ────────────────────────────────────── */
+.city-btn {
+  font-family: var(--font-mono);
+  font-size: 9px; letter-spacing: 0.12em;
+  padding: 4px 10px;
+  background: rgba(0,20,0,0.7);
+  border: 1px solid rgba(0,255,65,0.25);
+  color: var(--c-green-dim);
+  cursor: pointer; transition: all 0.1s;
+  text-transform: uppercase;
+}
+.city-btn:hover, .city-btn.active {
+  background: rgba(0,255,65,0.12);
+  border-color: var(--c-green);
+  color: var(--c-green);
+  box-shadow: 0 0 8px rgba(0,255,65,0.3);
+}
+
+/* ─── Mode button ────────────────────────────────────── */
+.mode-btn {
+  font-family: var(--font-mono);
+  font-size: 8px; letter-spacing: 0.1em;
+  padding: 4px 8px;
+  background: transparent;
+  border: 1px solid rgba(0,255,65,0.2);
+  color: rgba(0,255,65,0.5);
+  cursor: pointer; transition: all 0.1s;
+  text-transform: uppercase;
+}
+.mode-btn:hover { border-color: var(--c-amber); color: var(--c-amber); }
+.mode-btn.active {
+  background: rgba(255,176,0,0.15);
+  border-color: var(--c-amber);
+  color: var(--c-amber);
+  box-shadow: 0 0 8px rgba(255,176,0,0.4);
+}
+
+/* ─── Classification banner ──────────────────────────── */
+.classification-banner {
+  font-size: 9px; letter-spacing: 0.2em;
+  color: var(--c-red);
+  text-shadow: 0 0 8px rgba(255,45,45,0.6);
+}
+
+/* ─── Glow effects ───────────────────────────────────── */
+.glow-green { text-shadow: 0 0 8px var(--c-green), 0 0 16px rgba(0,255,65,0.4); }
+.glow-amber { text-shadow: 0 0 8px var(--c-amber), 0 0 16px rgba(255,176,0,0.4); }
+.glow-cyan  { text-shadow: 0 0 8px var(--c-cyan),  0 0 16px rgba(0,229,255,0.4); }
+
+/* ─── Loading spinner ────────────────────────────────── */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 1s linear infinite; }
+
+/* ─── Alert feed ─────────────────────────────────────── */
+.alert-item { border-left: 2px solid var(--c-amber); }
+.alert-item.critical { border-left-color: var(--c-red); }
+.alert-item.info { border-left-color: var(--c-cyan); }
