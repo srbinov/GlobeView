@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState, useCallback, forwardRef, useImperativeHandle } from 'react'
 import ReactGlobe from 'react-globe.gl'
 import * as THREE from 'three'
+import SatelliteMapOverlay from './SatelliteMapOverlay'
 
 const GLOBE_IMG  = 'https://unpkg.com/three-globe@2.31.1/example/img/earth-night.jpg'
 const BUMP_IMG   = 'https://unpkg.com/three-globe@2.31.1/example/img/earth-topology.png'
@@ -99,15 +100,21 @@ const ZBT = {
   lineHeight: 1, padding: '2px 6px', userSelect: 'none',
 }
 
+const SATELLITE_ALT_THRESHOLD = 0.15  // below this altitude show tiled satellite/street map
+
 const Globe = forwardRef(function Globe({
-  layers, flights, satellites, quakes, cameras = [],
+  layers, flights, satellites, quakes, cameras = [], news = [],
   viewMode, bloom, sharpen,
-  onFlightClick, onQuakeClick, onCameraClick,
+  onFlightClick, onQuakeClick, onCameraClick, onNewsClick,
   followFlightId,
+  selectedNews,
+  onNewsPinScreenPosition,
+  imageryStyle = 'satellite',
 }, ref) {
   const globeRef = useRef()
   const [dims, setDims]       = useState({ w: window.innerWidth, h: window.innerHeight })
   const [zoomAlt, setZoomAlt] = useState(2.5)
+  const [mapCenter, setMapCenter] = useState(null)
 
   // Stable flight objects: ThreeDigest stores __threeObjCustom on the data item itself.
   // Reusing the same object reference means the sprite is reused (updateSprite, not makeSprite).
@@ -117,9 +124,11 @@ const Globe = forwardRef(function Globe({
   // Refs so rAF / interval closures always see latest values
   const onClickRef       = useRef(onFlightClick)
   const onCameraClickRef = useRef(onCameraClick)
+  const onNewsPinRef     = useRef(onNewsPinScreenPosition)
   const followIdRef      = useRef(followFlightId)
   useEffect(() => { onClickRef.current       = onFlightClick  }, [onFlightClick])
   useEffect(() => { onCameraClickRef.current = onCameraClick  }, [onCameraClick])
+  useEffect(() => { onNewsPinRef.current     = onNewsPinScreenPosition }, [onNewsPinScreenPosition])
   useEffect(() => { followIdRef.current      = followFlightId }, [followFlightId])
 
   // Texture cache — only 3-4 colours ever used
@@ -212,6 +221,58 @@ const Globe = forwardRef(function Globe({
     return () => clearInterval(id)
   }, [followFlightId])
 
+  // ── When zoomed in past threshold, poll globe POV to sync satellite map overlay
+  useEffect(() => {
+    if (zoomAlt >= SATELLITE_ALT_THRESHOLD) {
+      setMapCenter(null)
+      return
+    }
+    let cancelled = false
+    const poll = () => {
+      if (cancelled) return
+      const globe = globeRef.current
+      const pov = globe?.pointOfView?.()
+      if (pov && typeof pov.lat === 'number' && typeof pov.lng === 'number')
+        setMapCenter({ lat: pov.lat, lng: pov.lng })
+      else
+        setMapCenter(c => c ?? { lat: 20, lng: 10 }) // fallback if getter not available
+    }
+    poll()
+    const id = setInterval(poll, 150)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [zoomAlt])
+
+  // ── Project selected news pin (lat/lng) to screen for connector line
+  const vec3 = useRef(new THREE.Vector3())
+  useEffect(() => {
+    if (!selectedNews) {
+      onNewsPinScreenPosition?.(null)
+      return
+    }
+    if (typeof onNewsPinScreenPosition !== 'function') return
+    let rafId
+    const tick = () => {
+      const globe = globeRef.current
+      const cb = onNewsPinRef.current
+      if (!globe || !cb) { rafId = requestAnimationFrame(tick); return }
+      const gc = globe.getCoords
+      const cam = globe.camera?.()
+      if (!gc || !cam) { rafId = requestAnimationFrame(tick); return }
+      const p = gc.call(globe, selectedNews.lat, selectedNews.lng, 0.001)
+      if (!p) { rafId = requestAnimationFrame(tick); return }
+      vec3.current.set(p.x, p.y, p.z)
+      vec3.current.project(cam)
+      const w = dims.w, h = dims.h
+      const x = (vec3.current.x + 1) * 0.5 * w
+      const y = (1 - vec3.current.y) * 0.5 * h
+      if (vec3.current.z <= 1) cb({ x, y })
+      else cb(null)
+      rafId = requestAnimationFrame(tick)
+    }
+    rafId = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(rafId)
+  }, [selectedNews, onNewsPinScreenPosition, dims.w, dims.h])
+
   // ── Globe CSS filter
   const globeFilter = useCallback(() => {
     const b = 0.75 + (bloom/100)*0.85, c = 1.0 + (sharpen/100)*1.2
@@ -251,6 +312,9 @@ const Globe = forwardRef(function Globe({
     const a = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, alt))
     setZoomAlt(a)
     globeRef.current?.pointOfView({ altitude: a }, 400)
+    const pov = globeRef.current?.pointOfView?.()
+    if (a < SATELLITE_ALT_THRESHOLD && pov && typeof pov.lat === 'number' && typeof pov.lng === 'number')
+      setMapCenter({ lat: pov.lat, lng: pov.lng })
   }, [])
 
   // ── Arc trails: 15-min forward path (computed from raw API data during render)
@@ -298,6 +362,18 @@ const Globe = forwardRef(function Globe({
       <div style="font-size:8px;color:#aaa;margin-top:2px">ALT ${Math.round(s.alt)} km</div></div>`,
     data: s, type: 'sat',
   }))
+  if (layers.news) news.forEach(n => {
+    const title = (n.title || '').replace(/</g, '&lt;').slice(0, 60)
+    otherPoints.push({
+      lat: n.lat, lng: n.lng, altitude: 0.001,
+      radius: 0.2, color: '#ffb000',
+      label: `<div style="font-family:monospace;background:rgba(20,12,0,.95);border:1px solid #ffb000;padding:6px 10px;color:#ffb000;font-size:10px">
+        <div style="font-size:7px;margin-bottom:2px;letter-spacing:.1em">◈ NEWS</div>
+        <div style="color:#fff;font-size:11px">${title}${(n.title||'').length > 60 ? '…' : ''}</div>
+        <div style="font-size:8px;color:#aaa;margin-top:2px">${n.country || n.source} · Click to view</div></div>`,
+      data: n, type: 'news',
+    })
+  })
 
   const quakeRings = layers.earthquakes ? quakes.map(q => ({
     lat: q.lat, lng: q.lon,
@@ -309,6 +385,15 @@ const Globe = forwardRef(function Globe({
 
   return (
     <div style={{ position:'absolute', inset:0, filter:globeFilter(), transition:'filter .6s ease' }}>
+      {/* Tiled satellite/street map when zoomed in close (buildings, streets) */}
+      {zoomAlt < SATELLITE_ALT_THRESHOLD && mapCenter && (
+        <SatelliteMapOverlay
+          center={mapCenter}
+          altitude={zoomAlt}
+          filterStyle={globeFilter()}
+          imageryStyle={imageryStyle}
+        />
+      )}
       <ReactGlobe
         ref={globeRef}
         width={dims.w} height={dims.h}
@@ -337,6 +422,7 @@ const Globe = forwardRef(function Globe({
         onPointClick={pt => {
           if (pt.type === 'quake') onQuakeClick?.(pt.data)
           if (pt.type === 'cctv')  onCameraClickRef.current?.(pt.data)
+          if (pt.type === 'news')  onNewsClick?.(pt.data)
         }}
         pointResolution={4}
 

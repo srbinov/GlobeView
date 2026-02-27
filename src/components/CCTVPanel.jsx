@@ -5,7 +5,7 @@ export default function CCTVPanel({ camera, onClose }) {
   const [imgError, setImgError] = useState(false)
   const [frameNum, setFrameNum] = useState(0)
 
-  // Refresh every 5 seconds — fast enough to feel live
+  // Refresh every 2 seconds so the feed feels live (most DOT cams update every 30–60s)
   useEffect(() => {
     if (!camera) return
     setTs(Date.now())
@@ -15,8 +15,8 @@ export default function CCTVPanel({ camera, onClose }) {
     const id = setInterval(() => {
       setTs(Date.now())
       setImgError(false)
-      setFrameNum(n => n + 1)
-    }, 5000)
+      setFrameNum((n) => n + 1)
+    }, 2000)
     return () => clearInterval(id)
   }, [camera?.id])
 
@@ -172,7 +172,7 @@ export default function CCTVPanel({ camera, onClose }) {
             background: 'rgba(0,0,0,0.72)', padding: '3px 8px',
             letterSpacing: '0.08em',
           }}>
-            ↻ LIVE · 5s REFRESH
+            ↻ LIVE · 2s REFRESH
           </div>
         </div>
 
@@ -185,8 +185,9 @@ export default function CCTVPanel({ camera, onClose }) {
         }}>
           <span>
             {camera.country === 'UK'     ? 'TfL JamCam · Transport for London' :
-             camera.country === 'US'     ? 'NYC DOT · Traffic Management Center' :
+             camera.country === 'US'     ? (camera.city === 'Washington' ? 'WSDOT · Washington State DOT' : 'NYC DOT · Traffic Management Center') :
              camera.country === 'Canada' ? 'Ontario 511 · Highway Safety Cameras' :
+             camera.country === 'AU' ? 'OpenTrafficCamMap · Australia' :
              'PUBLIC CCTV FEED'}
           </span>
           <a

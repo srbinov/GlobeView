@@ -20,6 +20,7 @@ function SliderRow({ label, value, onChange, unit = '%', min = 0, max = 100 }) {
 
 export default function RightPanel({
   viewMode, setViewMode,
+  imageryStyle, setImageryStyle,
   bloom, setBloom,
   sharpen, setSharpen,
   hudMode, setHudMode,
@@ -127,10 +128,35 @@ export default function RightPanel({
             <SliderRow label="INSTABILITY" value={instability} onChange={setInstability} />
           </div>
 
-          {/* ── View mode switcher */}
+          {/* ── Map imagery (when zoomed in: satellite = real colors, street = OSM) */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: '8px', color: 'rgba(0,255,65,0.4)', letterSpacing: '0.12em', marginBottom: 8 }}>
+              ── MAP IMAGERY ──
+            </div>
+            <div style={{ fontSize: '7px', color: 'rgba(0,255,65,0.5)', marginBottom: 6 }}>
+              Close-up zoom: streets &amp; buildings
+            </div>
+            <div style={{ display: 'flex', gap: 4 }}>
+              {['satellite', 'street'].map(s => (
+                <button
+                  key={s}
+                  className={`mode-btn ${imageryStyle === s ? 'active' : ''}`}
+                  style={{ flex: 1, fontSize: '8px' }}
+                  onClick={() => setImageryStyle(s)}
+                >
+                  {s === 'satellite' ? 'SATELLITE' : 'STREET'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* ── View mode (filters: B&W, night vision, etc. — apply to globe & map) */}
           <div>
             <div style={{ fontSize: '8px', color: 'rgba(0,255,65,0.4)', letterSpacing: '0.12em', marginBottom: 8 }}>
               ── VIEW MODE ──
+            </div>
+            <div style={{ fontSize: '7px', color: 'rgba(0,255,65,0.5)', marginBottom: 6 }}>
+              Real / B&amp;W / NVG / FLIR …
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
               {MODES.map(m => (

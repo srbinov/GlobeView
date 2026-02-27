@@ -3,7 +3,7 @@ import LeftPanel    from './components/LeftPanel'
 import RightPanel   from './components/RightPanel'
 import HUD          from './components/HUD'
 import BottomBar    from './components/BottomBar'
-import FlightCard   from './components/FlightCard'
+import FlightDetailPanel from './components/FlightDetailPanel'
 import CCTVPanel    from './components/CCTVPanel'
 import CameraList   from './components/CameraList'
 import { useFlights }     from './hooks/useFlights'
@@ -11,6 +11,8 @@ import { useSatellites }  from './hooks/useSatellites'
 import { useEarthquakes } from './hooks/useEarthquakes'
 import { useWeather }     from './hooks/useWeather'
 import { useCCTV }        from './hooks/useCCTV'
+import { useNews }        from './hooks/useNews'
+import NewsPanel          from './components/NewsPanel'
 
 // Lazy-load the heavy globe component
 const Globe = lazy(() => import('./components/Globe'))
@@ -23,10 +25,12 @@ export default function App() {
     earthquakes: false,
     weather:     false,
     cctv:        false,
+    news:        false,
   })
 
   // ── Visual controls
   const [viewMode,         setViewMode]         = useState('normal')
+  const [imageryStyle,     setImageryStyle]     = useState('satellite')  // satellite | street (when zoomed in)
   const [bloom,            setBloom]            = useState(30)
   const [sharpen,          setSharpen]          = useState(20)
   const [hudMode,          setHudMode]          = useState('tactical')
@@ -37,16 +41,20 @@ export default function App() {
   const [instability,      setInstability]      = useState(0)
 
   // ── Live data hooks
-  const { flights,   loading: lFlights,  error: eFlights,  count: cFlights }  = useFlights(layers.flights)
+  const { flights,   loading: lFlights,  error: eFlights,  count: cFlights,
+          refetch: refetchFlights }                                             = useFlights(layers.flights)
   const { positions: sats, loading: lSats, error: eSats, count: cSats }       = useSatellites(layers.satellites)
   const { quakes,    loading: lQuakes,   error: eQuakes,   count: cQuakes }    = useEarthquakes(layers.earthquakes)
   const { tileUrl,   loading: lWeather,  error: eWeather }                     = useWeather(layers.weather)
   const { cameras,   loading: lCCTV,    error: eCCTV,     count: cCCTV }      = useCCTV(layers.cctv)
+  const { news,      loading: lNews,    error: eNews,     count: cNews }      = useNews(layers.news)
 
   // ── UI state
   const [selectedFlight,  setSelectedFlight]  = useState(null)
   const [followFlightId,  setFollowFlightId]  = useState(null)
   const [selectedCamera,  setSelectedCamera]  = useState(null)
+  const [selectedNews,    setSelectedNews]    = useState(null)
+  const [newsPinScreen,   setNewsPinScreen]   = useState(null)
   const [cameraListOpen,  setCameraListOpen]  = useState(false)
   const [alerts,          setAlerts]          = useState([])
   const globeRef = useRef()
@@ -82,6 +90,13 @@ export default function App() {
     else if (instability > 5)  root.classList.add('instability-1')
   }, [instability])
 
+  // ── Auto-retry flights on error (15s backoff)
+  useEffect(() => {
+    if (!eFlights || !layers.flights) return
+    const tid = setTimeout(refetchFlights, 15_000)
+    return () => clearTimeout(tid)
+  }, [eFlights, layers.flights, refetchFlights])
+
   // ── Auto-generate alerts from live data
   useEffect(() => {
     const next = []
@@ -93,9 +108,9 @@ export default function App() {
     if (next.length) setAlerts(next)
   }, [quakes.length, flights.length])
 
-  const counts    = { flights: cFlights, satellites: cSats, earthquakes: cQuakes, cctv: cCCTV }
-  const loadingMap = { flights: lFlights, satellites: lSats, earthquakes: lQuakes, weather: lWeather, cctv: lCCTV }
-  const errorsMap  = { flights: eFlights, satellites: eSats, earthquakes: eQuakes, weather: eWeather, cctv: eCCTV }
+  const counts    = { flights: cFlights, satellites: cSats, earthquakes: cQuakes, cctv: cCCTV, news: cNews }
+  const loadingMap = { flights: lFlights, satellites: lSats, earthquakes: lQuakes, weather: lWeather, cctv: lCCTV, news: lNews }
+  const errorsMap  = { flights: eFlights, satellites: eSats, earthquakes: eQuakes, weather: eWeather, cctv: eCCTV, news: eNews }
 
   return (
     <div style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden' }}>
@@ -109,16 +124,21 @@ export default function App() {
           satellites={sats}
           quakes={quakes}
           cameras={cameras}
+          news={news}
           viewMode={viewMode}
+          imageryStyle={imageryStyle}
           bloom={bloom}
           sharpen={sharpen}
           followFlightId={followFlightId}
+          selectedNews={selectedNews}
+          onNewsPinScreenPosition={setNewsPinScreen}
           onFlightClick={f => { setSelectedFlight(f); setFollowFlightId(f.id) }}
           onQuakeClick={q => setAlerts(prev => [
             ...prev.slice(-9),
             { id: q.id, type: 'seismic', message: `SEISMIC M${q.mag?.toFixed(1)} · ${(q.place||'').slice(0,40)}`, ts: Date.now() }
           ])}
           onCameraClick={c => setSelectedCamera(c)}
+          onNewsClick={n => setSelectedNews(n)}
         />
       </Suspense>
 
@@ -131,6 +151,12 @@ export default function App() {
         loading={loadingMap}
         onBrowseCamera={() => setCameraListOpen(o => !o)}
         cameraListOpen={cameraListOpen}
+        flights={flights}
+        onFlightLookup={(flight) => {
+          setSelectedFlight(flight)
+          setFollowFlightId(flight.id)
+          globeRef.current?.flyTo(flight.lat, flight.lon, 0.4)
+        }}
       />
 
       {/* ── Camera browser panel */}
@@ -145,6 +171,7 @@ export default function App() {
 
       <RightPanel
         viewMode={viewMode}            setViewMode={setViewMode}
+        imageryStyle={imageryStyle}    setImageryStyle={setImageryStyle}
         bloom={bloom}                  setBloom={setBloom}
         sharpen={sharpen}              setSharpen={setSharpen}
         hudMode={hudMode}              setHudMode={setHudMode}
@@ -152,7 +179,7 @@ export default function App() {
         panopticDensity={panopticDensity} setPanopticDensity={setPanopticDensity}
         pixelation={pixelation}        setPixelation={setPixelation}
         distortion={distortion}        setDistortion={setDistortion}
-        instability={instability}      setInstability={setInstability}
+        instability={instability}     setInstability={setInstability}
       />
 
       {/* ── HUD overlays */}
@@ -175,9 +202,22 @@ export default function App() {
         />
       )}
 
-      {/* ── Flight detail card */}
+      {/* ── News broadcast panel (pins + feed with line to location) */}
+      {layers.news && (
+        <NewsPanel
+          news={news}
+          loading={lNews}
+          error={eNews}
+          selectedNews={selectedNews}
+          onSelectNews={setSelectedNews}
+          onClose={() => setSelectedNews(null)}
+          pinScreenPosition={newsPinScreen}
+        />
+      )}
+
+      {/* ── Flight detail panel (FR24-style) */}
       {selectedFlight && (
-        <FlightCard
+        <FlightDetailPanel
           flight={selectedFlight}
           onClose={() => {
             setSelectedFlight(null)
