@@ -9,7 +9,10 @@
       "WebFetch(domain:511ny.org)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:publicapi.ohgo.com)",
-      "WebFetch(domain:511on.ca)"
+      "WebFetch(domain:511on.ca)",
+      "Bash(npm run:*)",
+      "Bash(npm install:*)",
+      "WebFetch(domain:graph.mapillary.com)"
     ]
   }
 }

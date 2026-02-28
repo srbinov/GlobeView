@@ -2,6 +2,7 @@ import { useRef, useEffect, useState, useCallback, forwardRef, useImperativeHand
 import ReactGlobe from 'react-globe.gl'
 import * as THREE from 'three'
 import SatelliteMapOverlay from './SatelliteMapOverlay'
+import SearchBar from './SearchBar'
 
 const GLOBE_IMG  = 'https://unpkg.com/three-globe@2.31.1/example/img/earth-night.jpg'
 const BUMP_IMG   = 'https://unpkg.com/three-globe@2.31.1/example/img/earth-topology.png'
@@ -100,7 +101,8 @@ const ZBT = {
   lineHeight: 1, padding: '2px 6px', userSelect: 'none',
 }
 
-const SATELLITE_ALT_THRESHOLD = 0.15  // below this altitude show tiled satellite/street map
+const SATELLITE_ALT_THRESHOLD = 0.15  // below this altitude show Leaflet map overlay
+const GLOBE_RETURN_ALT        = 0.20  // altitude used when returning to globe from Leaflet
 
 const Globe = forwardRef(function Globe({
   layers, flights, satellites, quakes, cameras = [], news = [],
@@ -114,7 +116,6 @@ const Globe = forwardRef(function Globe({
   const globeRef = useRef()
   const [dims, setDims]       = useState({ w: window.innerWidth, h: window.innerHeight })
   const [zoomAlt, setZoomAlt] = useState(2.5)
-  const [mapCenter, setMapCenter] = useState(null)
 
   // Stable flight objects: ThreeDigest stores __threeObjCustom on the data item itself.
   // Reusing the same object reference means the sprite is reused (updateSprite, not makeSprite).
@@ -157,6 +158,37 @@ const Globe = forwardRef(function Globe({
 
   useEffect(() => {
     globeRef.current?.pointOfView({ lat: 20, lng: 10, altitude: 2.5 }, 0)
+  }, [])
+
+  // ── Sync zoomAlt from the globe's actual OrbitControls (scroll wheel / pinch / animation)
+  // This is critical: without it, zoomAlt is only updated by the zoom bar buttons,
+  // so scrolling to zoom leaves the zoom bar frozen and the overlay showing at wrong times.
+  useEffect(() => {
+    let controls = null
+    let cleanupFn = null
+
+    const handler = () => {
+      const pov = globeRef.current?.pointOfView?.()
+      if (pov?.altitude == null) return
+      setZoomAlt(prev => {
+        const next = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, pov.altitude))
+        // Only trigger re-render if altitude changed meaningfully (avoids 60fps setState spam)
+        return Math.abs(next - prev) > 0.003 ? next : prev
+      })
+    }
+
+    const tryAttach = () => {
+      controls = globeRef.current?.controls?.()
+      if (!controls) return false
+      controls.addEventListener('change', handler)
+      cleanupFn = () => controls.removeEventListener('change', handler)
+      return true
+    }
+
+    // Globe controls aren't ready until Three.js initialises — poll briefly
+    if (tryAttach()) return () => cleanupFn?.()
+    const id = setInterval(() => { if (tryAttach()) clearInterval(id) }, 100)
+    return () => { clearInterval(id); cleanupFn?.() }
   }, [])
 
   // ── Sync stable map when API data changes (every ~30 s)
@@ -221,26 +253,6 @@ const Globe = forwardRef(function Globe({
     return () => clearInterval(id)
   }, [followFlightId])
 
-  // ── When zoomed in past threshold, poll globe POV to sync satellite map overlay
-  useEffect(() => {
-    if (zoomAlt >= SATELLITE_ALT_THRESHOLD) {
-      setMapCenter(null)
-      return
-    }
-    let cancelled = false
-    const poll = () => {
-      if (cancelled) return
-      const globe = globeRef.current
-      const pov = globe?.pointOfView?.()
-      if (pov && typeof pov.lat === 'number' && typeof pov.lng === 'number')
-        setMapCenter({ lat: pov.lat, lng: pov.lng })
-      else
-        setMapCenter(c => c ?? { lat: 20, lng: 10 }) // fallback if getter not available
-    }
-    poll()
-    const id = setInterval(poll, 150)
-    return () => { cancelled = true; clearInterval(id) }
-  }, [zoomAlt])
 
   // ── Project selected news pin (lat/lng) to screen for connector line
   const vec3 = useRef(new THREE.Vector3())
@@ -312,10 +324,67 @@ const Globe = forwardRef(function Globe({
     const a = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, alt))
     setZoomAlt(a)
     globeRef.current?.pointOfView({ altitude: a }, 400)
-    const pov = globeRef.current?.pointOfView?.()
-    if (a < SATELLITE_ALT_THRESHOLD && pov && typeof pov.lat === 'number' && typeof pov.lng === 'number')
-      setMapCenter({ lat: pov.lat, lng: pov.lng })
   }, [])
+
+  // ── Called by SatelliteMapOverlay when the user zooms out of the Leaflet map.
+  //    We snap zoomAlt above the threshold first (hides overlay, re-enables controls
+  //    via overlay cleanup), then position the globe at the Leaflet center instantly
+  //    (duration=0) to avoid intermediate altitudes re-triggering the overlay.
+  const handleOverlayZoomOut = useCallback((lat, lng) => {
+    setZoomAlt(GLOBE_RETURN_ALT)
+    requestAnimationFrame(() => {
+      globeRef.current?.pointOfView({ lat, lng: lng, altitude: GLOBE_RETURN_ALT }, 0)
+    })
+  }, [])
+
+  // ── Search animation: zoom out → rotate → zoom in (Google Earth style)
+  const [animating,  setAnimating]  = useState(false)
+  const animTimers = useRef([])
+
+  // Cancel any in-flight search animation
+  const cancelSearchAnim = useCallback(() => {
+    animTimers.current.forEach(clearTimeout)
+    animTimers.current = []
+  }, [])
+
+  // Cleanup on unmount
+  useEffect(() => cancelSearchAnim, [cancelSearchAnim])
+
+  const handleSearchSelect = useCallback(({ lat, lng }) => {
+    cancelSearchAnim()
+
+    // Lock the overlay so it never flickers on/off during the animation.
+    // Also snap zoomAlt above threshold so the Leaflet overlay unmounts immediately
+    // (which re-enables OrbitControls so pointOfView can drive the camera).
+    setAnimating(true)
+    setZoomAlt(GLOBE_RETURN_ALT)
+
+    const sched = (fn, delay) => {
+      const id = setTimeout(fn, delay)
+      animTimers.current.push(id)
+    }
+
+    // ─ Step 1 (t ≈ 80 ms): pull back to full globe view
+    sched(() => {
+      globeRef.current?.pointOfView({ altitude: 2.5 }, 800)
+    }, 80)
+
+    // ─ Step 2 (t ≈ 980 ms): rotate globe so the target is centred — altitude stays 2.5
+    sched(() => {
+      globeRef.current?.pointOfView({ lat, lng, altitude: 2.5 }, 1100)
+    }, 980)
+
+    // ─ Step 3 (t ≈ 2 180 ms): plunge all the way in to street level
+    sched(() => {
+      globeRef.current?.pointOfView({ lat, lng, altitude: ZOOM_MIN }, 1800)
+    }, 2180)
+
+    // ─ Release lock (t ≈ 4 280 ms): animation is done, let the overlay appear
+    sched(() => {
+      setAnimating(false)
+      setZoomAlt(ZOOM_MIN)   // ensure state matches camera in case change event was missed
+    }, 4280)
+  }, [cancelSearchAnim])
 
   // ── Arc trails: 15-min forward path (computed from raw API data during render)
   const flightArcs = layers.flights ? flights.map(f => {
@@ -383,15 +452,23 @@ const Globe = forwardRef(function Globe({
     colorFn: quakeRingColor(q.mag),
   })) : []
 
+  // Leaflet overlay active when zoomed in close — suppressed while search animation runs
+  // so the overlay never flickers into view at intermediate altitudes during the zoom.
+  const overlayActive = !animating && zoomAlt < SATELLITE_ALT_THRESHOLD
+
   return (
     <div style={{ position:'absolute', inset:0, filter:globeFilter(), transition:'filter .6s ease' }}>
-      {/* Tiled satellite/street map when zoomed in close (buildings, streets) */}
-      {zoomAlt < SATELLITE_ALT_THRESHOLD && mapCenter && (
+      {/* ── Search bar — always visible, top-right of screen */}
+      <SearchBar onSelect={handleSearchSelect} />
+
+      {/* Leaflet satellite/street map — takes over when zoomed in past threshold */}
+      {overlayActive && (
         <SatelliteMapOverlay
-          center={mapCenter}
+          globeRef={globeRef}
           altitude={zoomAlt}
-          filterStyle={globeFilter()}
           imageryStyle={imageryStyle}
+          onZoomOut={handleOverlayZoomOut}
+          filterStyle={globeFilter()}
         />
       )}
       <ReactGlobe
@@ -433,8 +510,8 @@ const Globe = forwardRef(function Globe({
         ringRepeatPeriod="repeatPeriod" ringColor="colorFn" ringResolution={48}
       />
 
-      {/* ── Zoom Bar */}
-      <div style={{
+      {/* ── Zoom Bar (hidden when Leaflet overlay is active — it has its own controls) */}
+      {!overlayActive && <div style={{
         position: 'fixed', left: 228, top: '50%', transform: 'translateY(-50%)',
         zIndex: 200, pointerEvents: 'all',
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
@@ -464,9 +541,9 @@ const Globe = forwardRef(function Globe({
           fontSize: 7, letterSpacing: '0.08em',
           color: 'rgba(0,255,65,0.45)', textAlign: 'center', lineHeight: 1.4,
         }}>
-          {zoomAlt < 0.15 ? 'CLOSE\nUP' : zoomAlt < 0.6 ? 'REGIO\nNAL' : zoomAlt < 2 ? ' MID\nRANGE' : 'GLOBE'}
+          {zoomAlt < 0.6 ? 'REGIO\nNAL' : zoomAlt < 2 ? ' MID\nRANGE' : 'GLOBE'}
         </div>
-      </div>
+      </div>}
     </div>
   )
 })

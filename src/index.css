@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* ── Leaflet map — override default gray background with our dark theme */
+.leaflet-container { background: #060d06 !important; }
+
 /* ─── Fonts ─────────────────────────────────────────── */
 :root {
   --font-mono: 'JetBrains Mono', 'Courier New', monospace;

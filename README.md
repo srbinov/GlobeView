@@ -12,6 +12,16 @@ VITE_GNEWS_API_KEY=your_key_here
 
 Get a free API key at [gnews.io](https://gnews.io/) (no credit card required). Without it, the News layer will show an error until the key is set.
 
+## Street View (360° look-around)
+
+When zoomed in on the map, use **◈ STREET VIEW** for real 360° Street View (drag to look around, click blue links to move). Add to `.env`:
+
+```
+VITE_GOOGLE_MAPS_API_KEY=your_key_here
+```
+
+Create a key in [Google Cloud Console](https://console.cloud.google.com/) and enable **Maps JavaScript API**. Without the key, the app falls back to an embed iframe.
+
 Currently, two official plugins are available:
 
 - [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
