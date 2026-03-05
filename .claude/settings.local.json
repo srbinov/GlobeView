@@ -12,7 +12,8 @@
       "WebFetch(domain:511on.ca)",
       "Bash(npm run:*)",
       "Bash(npm install:*)",
-      "WebFetch(domain:graph.mapillary.com)"
+      "WebFetch(domain:graph.mapillary.com)",
+      "WebFetch(domain:x.com)"
     ]
   }
 }

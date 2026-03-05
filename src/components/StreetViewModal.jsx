@@ -6,18 +6,9 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import MalvinaPeoplePopover from './MalvinaPeoplePopover'
-import { MALVINA_RESIDENCE } from '../data/malvinaResidence'
 
 const MONO = "'JetBrains Mono','Courier New',monospace"
 const API_KEY = typeof import.meta !== 'undefined' && import.meta.env?.VITE_GOOGLE_MAPS_API_KEY
-const MALVINA_NEAR_DEG = 0.0015  // ~150 m — show people button when Street View is this close
-
-function isNearMalvina(lat, lng) {
-  const dlat = lat - MALVINA_RESIDENCE.lat
-  const dlng = lng - MALVINA_RESIDENCE.lng
-  return Math.sqrt(dlat * dlat + dlng * dlng) <= MALVINA_NEAR_DEG
-}
 
 function loadGoogleMapsScript(key) {
   if (window.google?.maps?.StreetViewPanorama) return Promise.resolve()
@@ -40,8 +31,6 @@ export default function StreetViewModal({ lat, lng, onClose, filterStyle }) {
   const panoramaRef = useRef(null)
   const [status, setStatus] = useState(API_KEY ? 'loading' : 'iframe')
   const [error, setError] = useState(null)
-  const [showPeoplePopup, setShowPeoplePopup] = useState(false)
-  const atMalvina = isNearMalvina(lat, lng)
 
   useEffect(() => {
     const onKey = (e) => {
@@ -267,42 +256,6 @@ export default function StreetViewModal({ lat, lng, onClose, filterStyle }) {
         />
       )}
 
-      {/* 👥 Residents button — only when Street View is at/near 3519 Malvina Ct */}
-      {atMalvina && status !== 'loading' && (
-        <button
-          type="button"
-          onClick={() => setShowPeoplePopup(true)}
-          style={{
-            position: 'absolute',
-            bottom: 24,
-            right: 24,
-            zIndex: 15,
-            width: 44,
-            height: 44,
-            borderRadius: '50%',
-            background: 'rgba(0,12,0,0.95)',
-            border: '2px solid rgba(0,255,65,0.7)',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: 20,
-            boxShadow: '0 0 14px rgba(0,255,65,0.35)',
-          }}
-          title="Residents at this address"
-        >
-          👥
-        </button>
-      )}
-
-      {/* People overlay — same as on satellite map; "house" is center of screen (you're standing there) */}
-      {showPeoplePopup && (
-        <MalvinaPeoplePopover
-          markerScreenPos={{ x: window.innerWidth / 2, y: window.innerHeight / 2 }}
-          filterStyle={filterStyle}
-          onClose={() => setShowPeoplePopup(false)}
-        />
-      )}
     </div>,
     document.body
   )

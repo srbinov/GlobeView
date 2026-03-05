@@ -78,14 +78,6 @@ function screenRotation(x, y, z, camMatrix, heading) {
   return Math.atan2(projR, projU) - (heading||0) * Math.PI / 180
 }
 
-function quakeRingColor(mag) {
-  if (mag >= 6) return t => `rgba(255,${Math.round(t*20)},0,${(1-t)*0.85})`
-  if (mag >= 5) return t => `rgba(255,${Math.round(100+t*50)},0,${(1-t)*0.8})`
-  if (mag >= 4) return t => `rgba(255,200,0,${(1-t)*0.75})`
-  return          t => `rgba(0,220,180,${(1-t)*0.6})`
-}
-function quakeMaxRadius(mag) { return Math.max(0.3, Math.pow(2, mag-2)*0.18) }
-
 function deadReckon(lat, lon, spd, hdg, dt) {
   if (!spd || dt <= 0) return { lat, lon }
   const R = 6371000, r = (hdg||0)*Math.PI/180
@@ -104,11 +96,13 @@ const ZBT = {
 const SATELLITE_ALT_THRESHOLD = 0.15  // below this altitude show Leaflet map overlay
 const GLOBE_RETURN_ALT        = 0.20  // altitude used when returning to globe from Leaflet
 
+const EARTH_RADIUS_KM = 6371
+
 const Globe = forwardRef(function Globe({
-  layers, flights, satellites, quakes, cameras = [], news = [],
+  layers, flights, satellites = [], cameras = [], news = [],
   viewMode, bloom, sharpen,
-  onFlightClick, onQuakeClick, onCameraClick, onNewsClick,
-  followFlightId,
+  onFlightClick, onSatelliteClick, onCameraClick, onNewsClick,
+  followFlightId, followSatelliteId, satelliteOrbitPath = [],
   selectedNews,
   onNewsPinScreenPosition,
   imageryStyle = 'satellite',
@@ -253,6 +247,21 @@ const Globe = forwardRef(function Globe({
     return () => clearInterval(id)
   }, [followFlightId])
 
+  // ── Follow satellite camera (same pattern; satellites update from hook every 30s)
+  const followSatRef = useRef(followSatelliteId)
+  useEffect(() => { followSatRef.current = followSatelliteId }, [followSatelliteId])
+  useEffect(() => {
+    if (!followSatelliteId || !globeRef.current || !layers.satellites) return
+    const sat = satellites.find(s => s.id === followSatelliteId)
+    if (sat) globeRef.current.pointOfView({ lat: sat.lat, lng: sat.lon, altitude: 0.6 }, 2000)
+    const id = setInterval(() => {
+      if (followSatRef.current !== followSatelliteId) return
+      const s = satellites.find(x => x.id === followSatRef.current)
+      if (s) globeRef.current?.pointOfView({ lat: s.lat, lng: s.lon, altitude: 0.6 }, 500)
+    }, 2000)
+    return () => clearInterval(id)
+  }, [followSatelliteId, layers.satellites, satellites])
+
 
   // ── Project selected news pin (lat/lng) to screen for connector line
   const vec3 = useRef(new THREE.Vector3())
@@ -396,19 +405,22 @@ const Globe = forwardRef(function Globe({
              color: isF ? '#ffb000' : 'rgba(0,255,65,0.2)', stroke: isF ? 1.5 : 0.35 }
   }) : []
 
+  // ── Satellite orbit path (only for the one we're tracking — no clutter)
+  const satelliteArcs = satelliteOrbitPath.length >= 2
+    ? satelliteOrbitPath.slice(0, -1).map((p, i) => {
+        const q = satelliteOrbitPath[i + 1]
+        return {
+          startLat: p.lat, startLng: p.lon,
+          endLat: q.lat, endLng: q.lon,
+          color: 'rgba(0,229,255,0.35)',
+          stroke: 0.5,
+        }
+      })
+    : []
+  const allArcs = [...flightArcs, ...satelliteArcs]
+
   // ── Non-flight points
   const otherPoints = []
-  if (layers.earthquakes) quakes.forEach(q => otherPoints.push({
-    lat: q.lat, lng: q.lon, altitude: 0,
-    radius: Math.max(0.15, q.mag*0.1),
-    color: q.mag>=5?'#ff2d00':q.mag>=4?'#ff8c00':'#ffdd00',
-    label: `<div style="font-family:monospace;background:rgba(20,0,0,.95);border:1px solid #f30;padding:6px 10px;color:#f80;font-size:11px">
-      <div style="color:#f22;font-size:8px;margin-bottom:3px">⚡ SEISMIC EVENT</div>
-      <div style="font-size:16px;color:#fff">M${q.mag?.toFixed(1)}</div>
-      <div style="font-size:9px;color:#aaa;margin-top:3px">${(q.place||'').slice(0,50)}</div>
-      <div style="font-size:8px;color:#666;margin-top:2px">DEPTH ${q.depth?.toFixed(0)} km</div></div>`,
-    data: q, type: 'quake',
-  }))
   if (layers.cctv) cameras.forEach(c => {
     const col = c.country === 'US' ? '#ff8c00' : c.country === 'Canada' ? '#ffd700' : '#ff2d2d'
     otherPoints.push({
@@ -421,57 +433,72 @@ const Globe = forwardRef(function Globe({
       data: c, type: 'cctv',
     })
   })
-  if (layers.satellites) satellites.forEach(s => otherPoints.push({
-    lat: s.lat, lng: s.lon,
-    altitude: Math.max(0.01, Math.min(s.alt/6371, 1.8)),
-    radius: 0.05, color: '#00e5ff',
-    label: `<div style="font-family:monospace;background:rgba(0,0,20,.95);border:1px solid #00e5ff;padding:5px 8px;color:#00e5ff;font-size:10px">
-      <div style="color:#fb0;font-size:7px;margin-bottom:2px">◈ ORBITAL ASSET</div>
-      <div>${s.name}</div>
-      <div style="font-size:8px;color:#aaa;margin-top:2px">ALT ${Math.round(s.alt)} km</div></div>`,
-    data: s, type: 'sat',
-  }))
+  // ── News: broadcast screenshot — real article photo framed like a TV news grab, sticking out from origin
   if (layers.news) news.forEach(n => {
-    const title = (n.title || '').replace(/</g, '&lt;').slice(0, 60)
+    const title = (n.title || '').replace(/</g, '&lt;').replace(/"/g, '&quot;').slice(0, 68)
+    const country = (n.country || n.source || '').replace(/</g, '&lt;')
+    const imgUrl = n.image ? n.image.replace(/"/g, '&quot;') : ''
     otherPoints.push({
-      lat: n.lat, lng: n.lng, altitude: 0.001,
-      radius: 0.2, color: '#ffb000',
-      label: `<div style="font-family:monospace;background:rgba(20,12,0,.95);border:1px solid #ffb000;padding:6px 10px;color:#ffb000;font-size:10px">
-        <div style="font-size:7px;margin-bottom:2px;letter-spacing:.1em">◈ NEWS</div>
-        <div style="color:#fff;font-size:11px">${title}${(n.title||'').length > 60 ? '…' : ''}</div>
-        <div style="font-size:8px;color:#aaa;margin-top:2px">${n.country || n.source} · Click to view</div></div>`,
-      data: n, type: 'news',
+      lat: n.lat,
+      lng: n.lng,
+      altitude: 0.032,
+      radius: 0.52,
+      color: '#cc0000',
+      label: `<div style="font-family:system-ui,sans-serif;width:260px;background:#000;border:4px solid #2a2a2a;box-shadow:inset 0 0 0 1px #111,0 12px 40px rgba(0,0,0,0.95),0 0 0 2px #cc0000;overflow:hidden;border-radius:8px">
+        <div style="position:relative;width:100%;height:146px;background:#0d0d0d;overflow:hidden">
+          ${imgUrl ? `<img src="${imgUrl}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover" onerror="this.parentElement.style.background='#0a0a0a'" />` : '<div style="width:100%;height:100%;background:linear-gradient(135deg,#1a1a1a,#0d0d0d);display:flex;align-items:center;justify-content:center;color:#444;font-size:10px">NO IMAGE</div>'}
+          <div style="position:absolute;top:0;left:0;right:0;background:linear-gradient(180deg,rgba(204,0,0,0.96) 0%,rgba(160,0,0,0.85) 100%);color:#fff;padding:6px 12px;font-size:11px;font-weight:800;letter-spacing:0.28em;text-shadow:0 1px 3px rgba(0,0,0,0.9)">● LIVE</div>
+          <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(0deg,rgba(0,0,0,0.94) 0%,transparent 70%);padding:32px 12px 12px;color:#fff;font-size:12px;font-weight:600;line-height:1.28;text-shadow:0 1px 4px #000">${title}${(n.title||'').length > 68 ? '…' : ''}</div>
+          <div style="position:absolute;bottom:10px;right:12px;color:#ffb000;font-size:9px;letter-spacing:0.1em;text-shadow:0 1px 2px #000">${country}</div>
+        </div>
+        <div style="height:0;border-left:14px solid transparent;border-right:14px solid transparent;border-top:12px solid #000;margin:0 auto;width:0;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.6))"></div>
+      </div>`,
+      data: n,
+      type: 'news',
     })
   })
-
-  const quakeRings = layers.earthquakes ? quakes.map(q => ({
-    lat: q.lat, lng: q.lon,
-    maxR: quakeMaxRadius(q.mag),
-    propagationSpeed: 1.5 + q.mag*0.3,
-    repeatPeriod: 900 - q.mag*60,
-    colorFn: quakeRingColor(q.mag),
-  })) : []
+  if (layers.satellites) satellites.forEach(s => {
+    const name = (s.name || '').replace(/</g, '&lt;').slice(0, 40)
+    const altKm = Math.round(s.altKm ?? 0)
+    const isF = s.id === followSatelliteId
+    otherPoints.push({
+      lat: s.lat, lng: s.lon,
+      altitude: Math.max(0.002, (s.altKm ?? 400) / EARTH_RADIUS_KM),
+      radius: isF ? 0.35 : 0.22,
+      color: isF ? '#ffb000' : '#00e5ff',
+      label: `<div style="font-family:monospace;background:rgba(0,12,20,.97);border:1px solid ${isF ? '#ffb000' : '#00e5ff'};padding:6px 10px;color:${isF ? '#ffb000' : '#00e5ff'};font-size:10px">
+        <div style="font-size:7px;margin-bottom:2px;letter-spacing:.1em">◈ SATELLITE</div>
+        <div style="color:#fff;font-size:11px">${name}${(s.name||'').length > 40 ? '…' : ''}</div>
+        <div style="font-size:8px;color:#aaa;margin-top:2px">${altKm} km · NORAD ${s.noradId || s.id} · Click to track</div></div>`,
+      data: s, type: 'satellite',
+    })
+  })
 
   // Leaflet overlay active when zoomed in close — suppressed while search animation runs
   // so the overlay never flickers into view at intermediate altitudes during the zoom.
   const overlayActive = !animating && zoomAlt < SATELLITE_ALT_THRESHOLD
 
   return (
-    <div style={{ position:'absolute', inset:0, filter:globeFilter(), transition:'filter .6s ease' }}>
-      {/* ── Search bar — always visible, top-right of screen */}
-      <SearchBar onSelect={handleSearchSelect} />
-
-      {/* Leaflet satellite/street map — takes over when zoomed in past threshold */}
+    <>
+      {/* ── Zoomed-in overlay: map (Mapbox or Leaflet) — OUTSIDE globe filter so it stays visible */}
       {overlayActive && (
-        <SatelliteMapOverlay
-          globeRef={globeRef}
-          altitude={zoomAlt}
-          imageryStyle={imageryStyle}
-          onZoomOut={handleOverlayZoomOut}
-          filterStyle={globeFilter()}
-        />
+        <div style={{ position: 'absolute', inset: 0, zIndex: 10, width: '100%', height: '100%' }}>
+          <SatelliteMapOverlay
+            globeRef={globeRef}
+            altitude={zoomAlt}
+            imageryStyle={imageryStyle}
+            trafficLayer={layers.traffic}
+            onZoomOut={handleOverlayZoomOut}
+            filterStyle={globeFilter()}
+          />
+        </div>
       )}
-      <ReactGlobe
+
+      <div style={{ position:'absolute', inset:0, filter:globeFilter(), transition:'filter .6s ease', pointerEvents: overlayActive ? 'none' : 'auto' }}>
+        {/* ── Search bar — always visible, top-right of screen */}
+        <SearchBar onSelect={handleSearchSelect} />
+
+        <ReactGlobe
         ref={globeRef}
         width={dims.w} height={dims.h}
         globeImageUrl={GLOBE_IMG} bumpImageUrl={BUMP_IMG} backgroundImageUrl={STARS_IMG}
@@ -485,7 +512,7 @@ const Globe = forwardRef(function Globe({
         onCustomLayerClick={d => onClickRef.current?.(d)}
 
         // ── Animated arc trails
-        arcsData={flightArcs}
+        arcsData={allArcs}
         arcStartLat="startLat" arcStartLng="startLng"
         arcEndLat="endLat"     arcEndLng="endLng"
         arcColor="color"       arcStroke="stroke"
@@ -497,17 +524,11 @@ const Globe = forwardRef(function Globe({
         pointLat="lat" pointLng="lng" pointAltitude="altitude"
         pointRadius="radius" pointColor="color" pointLabel="label"
         onPointClick={pt => {
-          if (pt.type === 'quake') onQuakeClick?.(pt.data)
-          if (pt.type === 'cctv')  onCameraClickRef.current?.(pt.data)
-          if (pt.type === 'news')  onNewsClick?.(pt.data)
+          if (pt.type === 'cctv')     onCameraClickRef.current?.(pt.data)
+          if (pt.type === 'news')     onNewsClick?.(pt.data)
+          if (pt.type === 'satellite') onSatelliteClick?.(pt.data)
         }}
         pointResolution={4}
-
-        // ── Earthquake rings
-        ringsData={quakeRings}
-        ringLat="lat" ringLng="lng"
-        ringMaxRadius="maxR" ringPropagationSpeed="propagationSpeed"
-        ringRepeatPeriod="repeatPeriod" ringColor="colorFn" ringResolution={48}
       />
 
       {/* ── Zoom Bar (hidden when Leaflet overlay is active — it has its own controls) */}
@@ -544,7 +565,8 @@ const Globe = forwardRef(function Globe({
           {zoomAlt < 0.6 ? 'REGIO\nNAL' : zoomAlt < 2 ? ' MID\nRANGE' : 'GLOBE'}
         </div>
       </div>}
-    </div>
+      </div>
+    </>
   )
 })
 

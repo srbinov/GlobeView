@@ -6,7 +6,7 @@ function fmtCoord(val, pos, neg) {
   return `${d}° ${val >= 0 ? pos : neg}`
 }
 
-export default function HUD({ hudMode, viewMode, flights, quakes, satellites }) {
+export default function HUD({ hudMode, viewMode, flights }) {
   const [time, setTime] = useState(new Date())
   const [coords, setCoords] = useState({ lat: 37.7749, lon: -122.4194, alt: 512000 })
   const [rec, setRec] = useState(true)
@@ -99,17 +99,9 @@ export default function HUD({ hudMode, viewMode, flights, quakes, satellites }) 
           pointerEvents: 'none', zIndex: 200,
           textAlign: 'right',
         }}>
-          <div style={{ marginBottom: 6 }}>
+          <div>
             <span className="hud-label">TRACKS &nbsp;</span>
             <span className="hud-value">{flights.length}</span>
-          </div>
-          <div style={{ marginBottom: 6 }}>
-            <span className="hud-label">SATS &nbsp;</span>
-            <span className="hud-value">{satellites.length}</span>
-          </div>
-          <div>
-            <span className="hud-label">SEISMIC &nbsp;</span>
-            <span className="hud-value">{quakes.length}</span>
           </div>
         </div>
       )}

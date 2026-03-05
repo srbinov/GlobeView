@@ -1,152 +1,144 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import * as satellite from 'satellite.js'
 
-// We generate synthetic TLE sets for a rich visual display.
-// Optionally, we also try fetching from CelesTrak's GP JSON (CORS-enabled).
-const CELESTRAK_GP = 'https://celestrak.org/SOCRATES/query.php?FORMAT=json'
+// CelesTrak: space stations + notable sats (real TLE data)
+const CELESTRAK_STATIONS = 'https://celestrak.org/NORAD/elements/gp.php?GROUP=stations&FORMAT=json'
+const MAX_SATELLITES = 22
+const TLE_POLL_MS = 30_000
+const POSITION_UPDATE_MS = 5_000
 
-function propagateAll(satrecs, date) {
-  const positions = []
-  for (const { name, satrec } of satrecs) {
-    try {
-      const pv = satellite.propagate(satrec, date)
-      if (!pv?.position || pv.position === false) continue
-      const gmst = satellite.gstime(date)
-      const geo  = satellite.eciToGeodetic(pv.position, gmst)
-      const lat  = satellite.degreesLat(geo.latitude)
-      const lon  = satellite.degreesLong(geo.longitude)
-      const alt  = geo.height // km
-      if (!isFinite(lat) || !isFinite(lon) || !isFinite(alt)) continue
-      positions.push({ name, lat, lon, alt })
-    } catch { /* skip degenerate orbits */ }
-  }
-  return positions
-}
-
-function buildSyntheticSatrecs() {
-  // Build ~180 synthetic satrecs at various inclinations and altitudes
-  // These represent a realistic cross-section of the operational catalog.
-  const REAL_TLES = [
-    // ISS
-    ['ISS (ZARYA)', '1 25544U 98067A   24001.50000000  .00016717  00000-0  10270-3 0  9993', '2 25544  51.6400 208.9163 0006317  86.9974 273.1813 15.49212164 30000'],
-    // Hubble
-    ['HUBBLE',      '1 20580U 90037B   24001.00000000  .00001000  00000-0  30000-4 0  9991', '2 20580  28.4700 120.0000 0002500 200.0000 160.0000 15.09700000 40001'],
-    // GPS II
-    ['GPS IIR-10',  '1 26360U 00025A   24001.00000000  .00000000  00000-0  00000-0 0  9992', '2 26360  55.5000  45.0000 0100000   0.0000   0.0000  2.00563107 40002'],
-  ]
-
-  const satrecs = []
-
-  // Add real ones first
-  for (const [name, l1, l2] of REAL_TLES) {
-    try {
-      const satrec = satellite.twoline2satrec(l1, l2)
-      if (satrec.error === 0) satrecs.push({ name, satrec })
-    } catch { /* skip */ }
-  }
-
-  // Synthetic orbital shells
-  // [inclination°, altitude km, count]
-  const shells = [
-    [0,     35786, 8],   // GEO
-    [51.6,  408,   12],  // ISS-like LEO
-    [53,    550,   20],  // Starlink shell 1
-    [53.2,  560,   20],  // Starlink shell 2
-    [70,    540,   15],  // High-inclination LEO
-    [86,    450,   15],  // Sun-sync-ish
-    [97.8,  500,   20],  // SSO
-    [63.4,  1200,  15],  // Molniya-ish
-    [28.5,  400,   10],  // Cape launch LEO
-    [90,    650,   10],  // Polar
-    [0,     20200, 6],   // GPS altitude
-  ]
-
-  let satNum = 70000
-  for (const [inc, altKm, cnt] of shells) {
-    const raanStep = 360 / cnt
-    // Mean motion (rev/day) from altitude
-    const mu = 398600.4418 // km³/s²
-    const r  = 6371 + altKm
-    const n  = Math.sqrt(mu / (r * r * r)) * 86400 / (2 * Math.PI)
-
-    for (let i = 0; i < cnt; i++) {
-      const raan = (i * raanStep + satNum * 0.7) % 360
-      const ma   = (i * (360 / cnt) * 1.37) % 360
-      // Format as TLE strings
-      const l1 = `1 ${String(satNum).padStart(5)}U 24001A   24001.50000000  .00000050  00000-0  50000-5 0  9991`
-      const l2 = `2 ${String(satNum).padStart(5)}  ${inc.toFixed(4)} ${raan.toFixed(4)} 0001000   0.0000 ${ma.toFixed(4)} ${n.toFixed(8)}    10`
-      try {
-        const satrec = satellite.twoline2satrec(l1, l2)
-        if (satrec.error === 0) {
-          satrecs.push({ name: `${altKm < 2000 ? 'LEO' : altKm < 25000 ? 'MEO' : 'GEO'}-${satNum}`, satrec })
-        }
-      } catch { /* skip */ }
-      satNum++
-      if (satrecs.length >= 180) break
+function propagateToGeodetic(satrec, date) {
+  try {
+    const jday = satellite.jday(
+      date.getUTCFullYear(),
+      date.getUTCMonth() + 1,
+      date.getUTCDate(),
+      date.getUTCHours(),
+      date.getUTCMinutes(),
+      date.getUTCSeconds()
+    )
+    const posVel = satellite.propagate(satrec, date)
+    if (posVel.position && typeof posVel.position.x === 'number') {
+      const gmst = satellite.gstime(jday)
+      const geodetic = satellite.eciToGeodetic(posVel.position, gmst)
+      const lat = satellite.radiansToDegrees(geodetic.latitude)
+      const lon = satellite.radiansToDegrees(geodetic.longitude)
+      const altKm = geodetic.height
+      return { lat, lon, altKm }
     }
-    if (satrecs.length >= 180) break
-  }
-
-  return satrecs
+  } catch (_) {}
+  return null
 }
 
 export function useSatellites(enabled) {
-  const [positions, setPositions] = useState([])
-  const [loading,   setLoading]   = useState(false)
-  const [error,     setError]     = useState(null)
-  const [count,     setCount]     = useState(0)
-  const satrecsRef  = useRef([])
-  const timerRef    = useRef(null)
+  const [satellites, setSatellites] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+  const intervalRef = useRef(null)
+  const positionIntervalRef = useRef(null)
+  const satrecsRef = useRef(new Map())
+  const listRef = useRef([])
 
-  // Propagate all satrecs to current time, update state
-  const tick = () => {
-    if (satrecsRef.current.length > 0) {
-      const pos = propagateAll(satrecsRef.current, new Date())
-      setPositions(pos)
+  const fetchSatellites = useCallback(async () => {
+    if (!enabled) return
+    try {
+      setLoading(true)
+      setError(null)
+      const res = await fetch(CELESTRAK_STATIONS)
+      if (!res.ok) throw new Error(`CelesTrak HTTP ${res.status}`)
+      const raw = await res.json()
+      const list = Array.isArray(raw) ? raw : []
+      const now = new Date()
+      const out = []
+      satrecsRef.current.clear()
+
+      for (let i = 0; i < Math.min(MAX_SATELLITES, list.length); i++) {
+        const o = list[i]
+        try {
+          const satrec = satellite.json2satrec(o)
+          satrecsRef.current.set(String(o.NORAD_CAT_ID), { satrec, name: o.OBJECT_NAME || `SAT ${o.NORAD_CAT_ID}` })
+          const pos = propagateToGeodetic(satrec, now)
+          if (pos) {
+            out.push({
+              id: String(o.NORAD_CAT_ID),
+              name: (o.OBJECT_NAME || `SAT ${o.NORAD_CAT_ID}`).trim(),
+              lat: pos.lat,
+              lon: pos.lon,
+              altKm: pos.altKm,
+              noradId: o.NORAD_CAT_ID,
+            })
+          }
+        } catch (_) {
+          // skip invalid TLE
+        }
+      }
+
+      listRef.current = out.map(s => ({ id: s.id, name: s.name, noradId: s.noradId }))
+      setSatellites(out)
+    } catch (e) {
+      console.warn('[useSatellites]', e.message)
+      setError(e.message)
+    } finally {
+      setLoading(false)
     }
-    timerRef.current = setTimeout(tick, 1000)
-  }
+  }, [enabled])
+
+  const updatePositions = useCallback(() => {
+    const now = new Date()
+    const out = []
+    for (const { id, name, noradId } of listRef.current) {
+      const entry = satrecsRef.current.get(String(id))
+      if (!entry) continue
+      const pos = propagateToGeodetic(entry.satrec, now)
+      if (pos) out.push({ id, name, noradId, lat: pos.lat, lon: pos.lon, altKm: pos.altKm })
+    }
+    if (out.length) setSatellites(out)
+  }, [])
 
   useEffect(() => {
     if (!enabled) {
-      setPositions([])
-      clearTimeout(timerRef.current)
+      setSatellites([])
+      listRef.current = []
+      satrecsRef.current.clear()
+      clearInterval(intervalRef.current)
+      clearInterval(positionIntervalRef.current)
       return
     }
-
-    setLoading(true)
-
-    // Try live CelesTrak GP data first, fall back to synthetics
-    const loadData = async () => {
-      let satrecs = []
-      try {
-        const res = await fetch(CELESTRAK_GP, { signal: AbortSignal.timeout(6000) })
-        if (res.ok) {
-          const json = await res.json()
-          for (const sat of json.slice(0, 180)) {
-            try {
-              const rec = satellite.twoline2satrec(sat.TLE_LINE1, sat.TLE_LINE2)
-              if (rec.error === 0) satrecs.push({ name: sat.OBJECT_NAME, satrec: rec })
-            } catch { /* skip */ }
-          }
-        }
-      } catch { /* network error or CORS block → use synthetics */ }
-
-      if (satrecs.length < 20) {
-        satrecs = buildSyntheticSatrecs()
-      }
-
-      satrecsRef.current = satrecs
-      setCount(satrecs.length)
-      setError(null)
-      setLoading(false)
+    fetchSatellites()
+    intervalRef.current = setInterval(fetchSatellites, TLE_POLL_MS)
+    positionIntervalRef.current = setInterval(updatePositions, POSITION_UPDATE_MS)
+    return () => {
+      clearInterval(intervalRef.current)
+      clearInterval(positionIntervalRef.current)
     }
+  }, [enabled, fetchSatellites, updatePositions])
 
-    loadData()
-    tick()
+  const getSatrec = useCallback((noradId) => {
+    const entry = satrecsRef.current.get(String(noradId))
+    return entry?.satrec ?? null
+  }, [])
 
-    return () => clearTimeout(timerRef.current)
-  }, [enabled])
+  const getOrbitPath = useCallback((noradId, minutesAhead = 90, stepMin = 2) => {
+    const entry = satrecsRef.current.get(String(noradId))
+    if (!entry?.satrec) return []
+    const satrec = entry.satrec
+    const now = new Date()
+    const points = []
+    for (let m = 0; m <= minutesAhead; m += stepMin) {
+      const t = new Date(now.getTime() + m * 60 * 1000)
+      const pos = propagateToGeodetic(satrec, t)
+      if (pos) points.push(pos)
+    }
+    return points
+  }, [])
 
-  return { positions, loading, error, count }
+  return {
+    satellites,
+    loading,
+    error,
+    count: satellites.length,
+    refetch: fetchSatellites,
+    getSatrec,
+    getOrbitPath,
+  }
 }

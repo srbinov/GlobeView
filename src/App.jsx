@@ -3,13 +3,12 @@ import LeftPanel    from './components/LeftPanel'
 import RightPanel   from './components/RightPanel'
 import HUD          from './components/HUD'
 import BottomBar    from './components/BottomBar'
-import FlightDetailPanel from './components/FlightDetailPanel'
+import FlightDetailPanel   from './components/FlightDetailPanel'
+import SatelliteDetailPanel from './components/SatelliteDetailPanel'
 import CCTVPanel    from './components/CCTVPanel'
 import CameraList   from './components/CameraList'
 import { useFlights }     from './hooks/useFlights'
 import { useSatellites }  from './hooks/useSatellites'
-import { useEarthquakes } from './hooks/useEarthquakes'
-import { useWeather }     from './hooks/useWeather'
 import { useCCTV }        from './hooks/useCCTV'
 import { useNews }        from './hooks/useNews'
 import NewsPanel          from './components/NewsPanel'
@@ -20,12 +19,11 @@ const Globe = lazy(() => import('./components/Globe'))
 export default function App() {
   // ── Layer toggles
   const [layers, setLayers] = useState({
-    flights:     false,
-    satellites:  true,
-    earthquakes: false,
-    weather:     false,
-    cctv:        false,
-    news:        false,
+    flights:    false,
+    satellites: false,
+    traffic:     false,
+    cctv:       false,
+    news:       false,
   })
 
   // ── Visual controls
@@ -43,15 +41,16 @@ export default function App() {
   // ── Live data hooks
   const { flights,   loading: lFlights,  error: eFlights,  count: cFlights,
           refetch: refetchFlights }                                             = useFlights(layers.flights)
-  const { positions: sats, loading: lSats, error: eSats, count: cSats }       = useSatellites(layers.satellites)
-  const { quakes,    loading: lQuakes,   error: eQuakes,   count: cQuakes }    = useEarthquakes(layers.earthquakes)
-  const { tileUrl,   loading: lWeather,  error: eWeather }                     = useWeather(layers.weather)
+  const { satellites, loading: lSats,   error: eSats,     count: cSats,
+          getOrbitPath }                                                        = useSatellites(layers.satellites)
   const { cameras,   loading: lCCTV,    error: eCCTV,     count: cCCTV }      = useCCTV(layers.cctv)
   const { news,      loading: lNews,    error: eNews,     count: cNews }      = useNews(layers.news)
 
   // ── UI state
-  const [selectedFlight,  setSelectedFlight]  = useState(null)
-  const [followFlightId,  setFollowFlightId]  = useState(null)
+  const [selectedFlight,    setSelectedFlight]    = useState(null)
+  const [followFlightId,    setFollowFlightId]    = useState(null)
+  const [selectedSatellite,  setSelectedSatellite]  = useState(null)
+  const [followSatelliteId,  setFollowSatelliteId]  = useState(null)
   const [selectedCamera,  setSelectedCamera]  = useState(null)
   const [selectedNews,    setSelectedNews]    = useState(null)
   const [newsPinScreen,   setNewsPinScreen]   = useState(null)
@@ -100,17 +99,14 @@ export default function App() {
   // ── Auto-generate alerts from live data
   useEffect(() => {
     const next = []
-    quakes.filter(q => q.mag >= 4).slice(0, 3).forEach(q =>
-      next.push({ id: q.id, type: 'seismic', message: `SEISMIC M${q.mag?.toFixed(1)} · ${(q.place || '').slice(0, 40)}`, ts: q.time })
-    )
     if (flights.length > 0)
       next.push({ id: 'fl-' + Date.now(), type: 'info', message: `${flights.length} ADS-B TRACKS · GLOBAL COVERAGE`, ts: Date.now() })
     if (next.length) setAlerts(next)
-  }, [quakes.length, flights.length])
+  }, [flights.length])
 
-  const counts    = { flights: cFlights, satellites: cSats, earthquakes: cQuakes, cctv: cCCTV, news: cNews }
-  const loadingMap = { flights: lFlights, satellites: lSats, earthquakes: lQuakes, weather: lWeather, cctv: lCCTV, news: lNews }
-  const errorsMap  = { flights: eFlights, satellites: eSats, earthquakes: eQuakes, weather: eWeather, cctv: eCCTV, news: eNews }
+  const counts    = { flights: cFlights, satellites: cSats, traffic: undefined, cctv: cCCTV, news: cNews }
+  const loadingMap = { flights: lFlights, satellites: lSats, traffic: false, cctv: lCCTV, news: lNews }
+  const errorsMap  = { flights: eFlights, satellites: eSats, traffic: null, cctv: eCCTV, news: eNews }
 
   return (
     <div style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden' }}>
@@ -121,8 +117,7 @@ export default function App() {
           ref={globeRef}
           layers={layers}
           flights={flights}
-          satellites={sats}
-          quakes={quakes}
+          satellites={satellites}
           cameras={cameras}
           news={news}
           viewMode={viewMode}
@@ -130,13 +125,12 @@ export default function App() {
           bloom={bloom}
           sharpen={sharpen}
           followFlightId={followFlightId}
+          followSatelliteId={followSatelliteId}
+          satelliteOrbitPath={followSatelliteId ? getOrbitPath(followSatelliteId, 90, 4) : []}
           selectedNews={selectedNews}
           onNewsPinScreenPosition={setNewsPinScreen}
           onFlightClick={f => { setSelectedFlight(f); setFollowFlightId(f.id) }}
-          onQuakeClick={q => setAlerts(prev => [
-            ...prev.slice(-9),
-            { id: q.id, type: 'seismic', message: `SEISMIC M${q.mag?.toFixed(1)} · ${(q.place||'').slice(0,40)}`, ts: Date.now() }
-          ])}
+          onSatelliteClick={s => { setSelectedSatellite(s); setFollowSatelliteId(s.id) }}
           onCameraClick={c => setSelectedCamera(c)}
           onNewsClick={n => setSelectedNews(n)}
         />
@@ -187,8 +181,6 @@ export default function App() {
         hudMode={hudMode}
         viewMode={viewMode}
         flights={flights}
-        quakes={quakes}
-        satellites={sats}
       />
 
       {/* ── Bottom navigation bar */}
@@ -229,6 +221,20 @@ export default function App() {
         />
       )}
 
+      {/* ── Satellite detail panel (track orbit) */}
+      {selectedSatellite && (
+        <SatelliteDetailPanel
+          satellite={selectedSatellite}
+          onClose={() => {
+            setSelectedSatellite(null)
+            setFollowSatelliteId(null)
+            globeRef.current?.flyTo(20, 10, 2.5)
+          }}
+          onFollow={() => setFollowSatelliteId(id => id === selectedSatellite.id ? null : selectedSatellite.id)}
+          isFollowing={followSatelliteId === selectedSatellite.id}
+        />
+      )}
+
       {/* ── Alert feed (bottom-right corner) */}
       {alerts.length > 0 && hudMode === 'tactical' && (
         <AlertFeed alerts={alerts} />
@@ -259,7 +265,7 @@ function GlobeLoader() {
         WORLDVIEW INITIALIZING
       </div>
       <div style={{ fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(0,255,65,0.4)' }}>
-        LOADING ORBITAL ASSETS...
+        LOADING...
       </div>
     </div>
   )
@@ -277,7 +283,7 @@ function AlertFeed({ alerts }) {
       {alerts.slice(-5).reverse().map((alert, i) => (
         <div
           key={alert.id || i}
-          className={`alert-item ${alert.type === 'seismic' ? 'critical' : 'info'}`}
+          className="alert-item info"
           style={{
             background: 'rgba(0,8,0,0.88)',
             padding: '5px 8px',
@@ -289,10 +295,10 @@ function AlertFeed({ alerts }) {
           }}
         >
           <div style={{
-            color: alert.type === 'seismic' ? 'var(--c-red)' : 'var(--c-amber)',
+            color: 'var(--c-amber)',
             marginBottom: 2, fontSize: '7px', letterSpacing: '0.12em',
           }}>
-            ▶ {alert.type?.toUpperCase()} ALERT
+            ▶ INFO
           </div>
           <div style={{ color: 'var(--c-green)' }}>{alert.message}</div>
         </div>

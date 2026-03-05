@@ -1,13 +1,11 @@
-
 import { useState } from 'react'
 
 const LAYERS = [
-  { id: 'flights',    label: 'LIVE FLIGHTS',    sub: 'OpenSky Network · Global ADS-B', color: '#00ff41' },
-  { id: 'satellites', label: 'ORBITAL ASSETS',  sub: 'CelesTrak TLE · SGP4 Propagation', color: '#00e5ff' },
-  { id: 'earthquakes',label: 'SEISMIC EVENTS',  sub: 'USGS · 24h Window', color: '#ff8c00' },
-  { id: 'weather',    label: 'WEATHER RADAR',   sub: 'RainViewer · Composite', color: '#4df7ff' },
-  { id: 'cctv',       label: 'CCTV MESH',       sub: 'Global · 10+ sources · Live feeds', color: '#ff2d2d' },
-  { id: 'news',       label: 'NEWS',             sub: 'GNews API · Headlines by region', color: '#ffb000' },
+  { id: 'flights',    label: 'LIVE FLIGHTS',   sub: 'OpenSky Network · Global ADS-B', color: '#00ff41' },
+  { id: 'satellites', label: 'SATELLITES',     sub: 'CelesTrak · ISS, stations, real TLE', color: '#00e5ff' },
+  { id: 'traffic',    label: 'STREET TRAFFIC', sub: 'Live traffic · Bird\'s-eye overlay', color: '#ffb000' },
+  { id: 'cctv',       label: 'CCTV MESH',      sub: 'Global · 10+ sources · Live feeds', color: '#ff2d2d' },
+  { id: 'news',       label: 'NEWS',          sub: 'GNews API · Headlines by region', color: '#ffb000' },
 ]
 
 const STUB_LAYERS = [

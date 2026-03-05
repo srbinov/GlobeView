@@ -3,8 +3,7 @@ import { createPortal } from 'react-dom'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import StreetViewModal from './StreetViewModal'
-import MalvinaPeoplePopover from './MalvinaPeoplePopover'
-import { MALVINA_RESIDENCE } from '../data/malvinaResidence'
+import MapboxBirdEyeOverlay, { MAPBOX_TOKEN } from './MapboxBirdEyeOverlay'
 
 // Zoom level below which we switch back to the 3D globe
 const BACK_TO_GLOBE_ZOOM = 9
@@ -48,18 +47,16 @@ function Btn({ onClick, disabled, children, sx }) {
 }
 
 // ── Main component ───────────────────────────────────────────────────────────
-export default function SatelliteMapOverlay({ globeRef, altitude, imageryStyle = 'satellite', onZoomOut, filterStyle }) {
+export default function SatelliteMapOverlay({ globeRef, altitude, imageryStyle = 'satellite', trafficLayer = false, onZoomOut, filterStyle }) {
   const containerRef = useRef(null)
   const mapRef       = useRef(null)
   const tileRef      = useRef(null)
-  const markerRef   = useRef(null)
   const styleRef     = useRef(imageryStyle)
   const onZoomOutRef = useRef(onZoomOut)
   const controlsRef  = useRef(null)
 
   const [currentZoom, setCurrentZoom] = useState(null)
   const [svLocation,  setSvLocation]  = useState(null)
-  const [peoplePopup, setPeoplePopup] = useState(null)   // { x, y } when open, null when closed
 
   useEffect(() => { onZoomOutRef.current = onZoomOut }, [onZoomOut])
 
@@ -107,26 +104,7 @@ export default function SatelliteMapOverlay({ globeRef, altitude, imageryStyle =
       }
     })
 
-    // ── Residence marker: 3519 Malvina Ct, Naperville IL — people button
-    const { lat: resLat, lng: resLng } = MALVINA_RESIDENCE
-    const divIcon = L.divIcon({
-      className: 'malvina-people-marker',
-      html: '<div style="width:32px;height:32px;background:rgba(0,12,0,0.95);border:2px solid rgba(0,255,65,0.7);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:0 0 10px rgba(0,255,65,0.3);cursor:pointer;">👥</div>',
-      iconSize: [32, 32],
-      iconAnchor: [16, 16],
-    })
-    const marker = L.marker([resLat, resLng], { icon: divIcon }).addTo(map)
-    marker.on('click', () => {
-      const mapEl = map.getContainer()
-      const rect = mapEl.getBoundingClientRect()
-      const pt = map.latLngToContainerPoint(marker.getLatLng())
-      setPeoplePopup({ x: rect.left + pt.x, y: rect.top + pt.y })
-    })
-    markerRef.current = marker
-
     return () => {
-      marker.remove()
-      markerRef.current = null
       map.remove()
       mapRef.current = null; tileRef.current = null
       if (controlsRef.current) { controlsRef.current.enabled = true; controlsRef.current = null }
@@ -154,11 +132,22 @@ export default function SatelliteMapOverlay({ globeRef, altitude, imageryStyle =
     currentZoom >= 14 ? 'DISTRICT' :
     currentZoom >= 11 ? 'CITY' : 'REGIONAL'
 
+  // When Mapbox token is set, use bird's-eye 3D view; otherwise Leaflet (flat)
+  if (MAPBOX_TOKEN) {
+    return (
+      <MapboxBirdEyeOverlay
+        globeRef={globeRef}
+        altitude={altitude}
+        imageryStyle={imageryStyle}
+        trafficLayer={trafficLayer}
+        onZoomOut={onZoomOut}
+        filterStyle={filterStyle}
+      />
+    )
+  }
+
   return (
     <div style={{ position: 'absolute', inset: 0, zIndex: 10 }}>
-      <style>{`
-        .malvina-people-marker.leaflet-div-icon { background: none !important; border: none !important; }
-      `}</style>
       <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
 
       {createPortal(
@@ -197,15 +186,6 @@ export default function SatelliteMapOverlay({ globeRef, altitude, imageryStyle =
               lng={svLocation.lng}
               onClose={() => setSvLocation(null)}
               filterStyle={filterStyle}
-            />
-          )}
-
-          {/* ── People at Malvina Ct — photos with lines to house */}
-          {peoplePopup && (
-            <MalvinaPeoplePopover
-              markerScreenPos={peoplePopup}
-              filterStyle={filterStyle}
-              onClose={() => setPeoplePopup(null)}
             />
           )}
         </>,
