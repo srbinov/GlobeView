@@ -1,4 +1,4 @@
-# WorldView — Geospatial Intelligence Dashboard
+# GlobeView!
 
 A real-time, open-source geospatial intelligence dashboard rendered on an interactive 3D globe. Track live flights, satellites, earthquakes, weather radar, traffic cameras, and breaking news — all in one tactical UI.
 
